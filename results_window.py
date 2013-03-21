@@ -42,6 +42,11 @@ class ResultsWindow(QMainWindow, ui_results_window.Ui_ResultsWindow):
         self.borders = []
         self.printer = QPrinter(QPrinter.HighResolution)
         self.printer.setPageSize(QPrinter.Letter)
+        
+        #########################
+        print("results from results window:",results)
+        print("--------------- END OF RESULTS FROM RESULTS WINDOW")
+        ########################
 
         QObject.connect(self.nav_tree, SIGNAL("itemClicked(QTreeWidgetItem*, int)"),
                                        self.item_clicked)
@@ -100,6 +105,8 @@ class ResultsWindow(QMainWindow, ui_results_window.Ui_ResultsWindow):
         # reset the scene
         self.graphics_view.setScene(self.scene)
         self.graphics_view.ensureVisible(QRectF(0,0,0,0))
+        
+
 
     def f(self):
         print self.current_line()
@@ -142,6 +149,8 @@ class ResultsWindow(QMainWindow, ui_results_window.Ui_ResultsWindow):
                                                 title, image, params_path=params_path)
 
             self.items_to_coords[qt_item] = pos
+            
+            
 
 
     def generate_pixmap(self, image):
@@ -205,6 +214,7 @@ class ResultsWindow(QMainWindow, ui_results_window.Ui_ResultsWindow):
     def create_text_item(self, text, position):
         txt_item = QGraphicsTextItem(QString(text))
         txt_item.setFont(QFont("courier", 12))
+        txt_item.setToolTip("To copy the text:\n1) Right click on the text and choose \"Select All\".\n2) Right click again and choose \"Copy\".")
         txt_item.setTextInteractionFlags(Qt.TextEditable)
         self.scene.addItem(txt_item)
         # fix for issue #149; was formerly txt_item.boundingRect().size().height()
@@ -248,10 +258,14 @@ class ResultsWindow(QMainWindow, ui_results_window.Ui_ResultsWindow):
     def create_pixmap_item(self, pixmap, position, title, image_path,\
                              params_path=None, matrix=QMatrix()):
         item = QGraphicsPixmapItem(pixmap)
-        self.y_coord += item.boundingRect().size().height()
-        item.setFlags(QGraphicsItem.ItemIsSelectable|
-                      QGraphicsItem.ItemIsMovable)
+        item.setToolTip("To save the image:\nright-click on the image and choose \"save image as\".")
         
+        
+        self.y_coord += item.boundingRect().size().height()
+#        item.setFlags(QGraphicsItem.ItemIsSelectable|
+#                      QGraphicsItem.ItemIsMovable)
+        item.setFlags(QGraphicsItem.ItemIsSelectable)
+
 
         self.scene.setSceneRect(0, 0, \
                                    max(self.scene.width(), \
@@ -323,7 +337,7 @@ class ResultsWindow(QMainWindow, ui_results_window.Ui_ResultsWindow):
                                                         "OpenMeta[Analyst] -- save plot as", 
                                                         default_path))
 
-        # now we re-generate it, unless they cancled, of course
+        # now we re-generate it, unless they canceled, of course
         if file_path != "":
             if plot_type == "forest":
                 if self._is_side_by_side_fp(title):

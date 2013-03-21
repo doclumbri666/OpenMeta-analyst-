@@ -7,6 +7,181 @@ isnt.null <- function(x){
 ############################ 
 # Binary data calculation  #
 ############################
+
+gimpute.bin.data <- function(bin.data) {
+	# Imputes binary 2x2 tables from fields in the bin.data frame parameter
+	# 
+	# a,b,c and d are the respective entries for the 2-x-2 table. they denote 
+	# treated events, treated total, control events, and control total, respectively
+	#
+	# There will be two sets of possible results for each parameter since the solution involves a quadratic
+	
+#	print("Bin data in R:")
+#	print(bin.data)
+	
+	metric <- as.character(bin.data[["metric"]])
+	est    <- bin.data[["estimate"]]
+	lower  <- bin.data[["lower"]]
+	upper  <- bin.data[["upper"]]
+	N_1    <- bin.data[["N_A"]]
+	N_0    <- bin.data[["N_B"]]
+	conf.level <- bin.data[["conf.level"]]
+	
+	# See if we have enough inputs to proceed
+	est_low_up_ok <- isnt.null(est) & (isnt.null(lower) | isnt.null(upper))
+	est_low_up_ok <- est_low_up_ok | (isnt.null(lower) & isnt.null(upper))
+	inputs_sufficient <- isnt.null(metric) & isnt.null(N_1) & isnt.null(N_0) &
+						 est_low_up_ok & isnt.null(conf.level)
+	if (!inputs_sufficient) {
+		print("Not enough inputs to back-calculate binary table!, exiting gimpute.bin.data..")
+		return(list(FAIL=NA))
+	}
+	
+	# Convert NULL to NA (we know the other values are not NULL already)
+	if (is.null(est))   est   <- NA
+	if (is.null(lower)) lower <- NA
+	if (is.null(upper)) upper <- NA
+	
+	
+	
+	###############################
+#	print("just metric:")
+#	print(metric)
+#	cat("Metric",metric,
+#		"\nest",est,
+#		"\nlower",lower,
+#		"\nupper",upper,
+#		"\nN_1",N_1,
+#		"\nN_0",N_0,
+#		"Conf.level",conf.level)
+	###############################
+	
+	alpha <- 1.0-(conf.level/100.0)
+	mult <- abs(qnorm(alpha/2.0)) # 1.96 for 95% CI
+	n <- N_0 + N_1
+	
+	# Calculates the estimate, low, and high if one of the three is NA, assumes
+	# symmetric distribution
+	calc.d.and.b <- function (d=NA, d_L=NA, d_U=NA) {
+		if (is.na(d))   d   <- (d_L + d_U)/2;
+		if (is.na(d_U)) d_U <- 2*d - d_L;
+		if (is.na(d_L)) d_L <- 2*d - d_U;
+		
+		b <- ((d_U - d) / mult)^2
+		res <- list(d=d, d_U=d_U, d_L=d_L, b=b)
+	}
+
+	impute.from.RD <- function () {
+		res <- calc.d.and.b(d=est, d_L=lower, d_U=upper)
+		d <- res[["d"]]; b <- res[["b"]]
+		
+		A <- n;
+		B <- (2*N_0*d-n);
+		C <- N_0*(N_1*b-d*(1-d));
+		
+		# calculate proportions
+		p0.op1 <- (-B+sqrt(B^2-4*A*C))/(2*A)
+		p0.op2 <- (-B-sqrt(B^2-4*A*C))/(2*A)
+		p1.op1 <- d + p0.op1
+		p1.op2 <- d + p0.op2
+
+		res <- list(op1=list(p0=p0.op1, p1=p1.op1), op2=list(p0=p0.op2, p1=p1.op2))
+	}
+	
+	impute.from.LOR <- function () {
+		res <- calc.d.and.b(d=log(est), d_L=log(lower), d_U=log(upper))
+		d <- res[["d"]]; b <- res[["b"]]
+		
+		#print("d: ")
+		#print(d)
+		#print("b: "); print(b)
+		
+		d <- exp(d) # convert OR back to normal scale (not log)
+		
+		A <- N_0*(1-d)^2+b*d*N_0*N_1
+		B <- -1*(2*N_0*(1-d)+b*d*N_0*N_1)
+		C <- N_0 + d*N_1
+		
+		#print("A: "); print(A);
+		#print("B: "); print(B);
+		#print("C: "); print(C);
+		
+		# calculate proportions
+		p0.op1 <- (-B+sqrt(B^2-4*A*C))/(2*A) 
+		p0.op2 <- (-B-sqrt(B^2-4*A*C))/(2*A) 
+		p1.op1 <- d*p0.op1/(d*p0.op1+1-p0.op1)
+		p1.op2 <- d*p0.op2/(d*p0.op2+1-p0.op2)
+		
+		#print("p0"); print(p0.op1); print(p0.op2);
+		#print("p1"); print(p1.op1); print(p1.op2);
+		
+		res <- list(op1=list(p0=p0.op1, p1=p1.op1), op2=list(p0=p0.op2, p1=p1.op2))
+		return(res)
+	}
+	
+	impute.from.LRR <- function () {
+		res <- calc.d.and.b(d=log(est), d_L=log(lower), d_U=log(upper))
+		d <- res[["d"]]; b <- res[["b"]]
+		
+		d <- exp(d)
+		
+		# calculate proportions
+		p0.op1 <- (N_0+d*N_1)/(d*(b*N_1*N_0+N_1+N_0))
+		p1.op1 <- p0.op1*d
+		
+		#print("p0"); print(p0.op1);
+		#print("p1"); print(p1.op1); 
+		
+		res <- list(op1=list(p0=p0.op1, p1=p1.op1))
+	}
+	
+	res <- switch(metric, "RD"=impute.from.RD(),
+			              "OR"=impute.from.LOR(),
+						  "RR"=impute.from.LRR())
+	
+	# calculate counts for each option
+	# Option 1:
+	a <- res$op1$p1 * N_1; a <- round(a, digits=0);
+	b <- N_1
+	c <- res$op1$p0 * N_0; c <- round(c, digits=0);
+	d <- N_0
+	op1 <- list(a=a, b=b, c=c, d=d)
+	# Test for valid answers
+	if (is.nan(a)|is.nan(b)|is.nan(c)|is.nan(d)) {
+		return(list(FAIL=NA))
+	}
+	
+	# Option 2:
+	if (isnt.null(res$op2)) {
+		a <- res$op2$p1 * N_1; a <- round(a, digits=0);
+		b <- N_1                                       
+		c <- res$op2$p0 * N_0; c <- round(c, digits=0);
+		d <- N_0
+		op2 <- list(a=a, b=b, c=c, d=d)
+		# Test for valid answers
+		if (is.nan(a)|is.nan(b)|is.nan(c)|is.nan(d)) {
+			return(list(FAIL=NA))
+		}
+	}
+	else {
+		op2 <- NULL;
+	}
+
+	if (is.null(op2)) {
+		res <- list(op1=op1)
+	}
+	else {
+		res <- list(op1=op1, op2=op2)
+	}
+	
+	
+	return(res)
+}
+	
+	
+
+
+#### WTF??? #####
 impute.bin.data <- function(bin.data){
     # this function imputes binary data (i.e., 2x2 tables) from the fields
     # available in the bin.data data frame parameter.
@@ -299,26 +474,188 @@ fillin.cont.AminusB <- function(
 ################################ 
 # Diagnostic data calculation  #
 ################################
-impute.diagnostic.data <- function(diag.data, metric){
-    # this function imputes diagnostic data (i.e., 2x2 tables) from the fields
-    # available in the diagnostic.data data frame parameter.
-    #
-    if (metric=="Sens") {
-      ci.data <- list(estimate=diag.data$sens, lb=diag.data$sens.lb, ub=diag.data$sens.ub, conf.level=diag.data$conf.level)
-      est.var <- calc.est.var(ci.data)
-      # fill in estimate, ci.lb, ci.ub
-      diag.data$sens <- est.var$estimate
-      diag.data$sens.var <- est.var$var
-      diag.data <- calc.sens.data(diag.data)
-    } else if (metric=="Spec") {
-      ci.data <- list(estimate=diag.data$spec, lb=diag.data$spec.lb, ub=diag.data$spec.ub, conf.level=diag.data$conf.level)
-      est.var <- calc.est.var(ci.data)
-      # fill in estimate, ci.lb, ci.ub
-      diag.data$spec <- est.var$estimate
-      diag.data$spec.var <- est.var$var
-      diag.data <- calc.spec.data(diag.data)
-    }  
-    diag.data 
+gimpute.diagnostic.data <- function(diag.data) {
+	# imputes diagnostic data (2x2 tables) from fields in diag.data data frame
+	# paramater. This will include (perhaps):
+	#   TP, FN, TN, FP, N, prev, sens, sens.lb, sens.ub, spec, spec.lb, spec.ub,
+	#   alpha
+	# Ignore the case #s below, just a way i was working things out
+	
+	#initialize local variables
+	
+	TP <- NULL; FN <- NULL; TN <- NULL; FP <-NULL;
+			
+	N    <-       diag.data[["total"]]
+	prev <-       diag.data[["prev"]]
+	sens <-       diag.data[["sens"]]
+	sens.lb <-    diag.data[["sens.lb"]]
+	sens.ub <-    diag.data[["sens.ub"]]
+	spec    <-    diag.data[["spec"]]
+	spec.lb <-    diag.data[["spec.lb"]]
+	spec.ub <-    diag.data[["spec.ub"]]
+	conf.level <- diag.data[["conf.level"]]
+	
+	case2a.condition <- isnt.null(sens) & isnt.null(prev) & isnt.null(N)
+	case2b.condition <- isnt.null(spec) & isnt.null(prev) & isnt.null(N)
+	
+	tmpA <- isnt.null(sens) & (isnt.null(sens.lb) | isnt.null(sens.ub))
+	tmpB <- isnt.null(sens.lb) & isnt.null(sens.ub)
+	case5a.condition <- (tmpA | tmpB) & isnt.null(conf.level)
+	case5b.condition <- case5a.condition & isnt.null(spec) & isnt.null(N)
+	
+	tmpA <- isnt.null(spec) & (isnt.null(spec.lb) | isnt.null(spec.ub))
+	tmpB <- isnt.null(spec.lb) & isnt.null(spec.ub)
+	case6a.condition <- (tmpA | tmpB) & isnt.null(conf.level)
+	case6b.condition <- case6a.condition & isnt.null(sens) & isnt.null(N)
+	
+	tmpA <- isnt.null(sens) & (isnt.null(sens.lb) | isnt.null(sens.ub))
+	tmpA <- tmpA | (isnt.null(sens.lb) & isnt.null(sens.ub))
+	tmpB <- isnt.null(spec) & (isnt.null(spec.lb) | isnt.null(spec.ub))
+	tmpB <- tmpB | (isnt.null(spec.lb) & isnt.null(spec.ub))
+	case8a.condition <- tmpA & isnt.null(conf.level)
+	case8b.condition <- tmpB & isnt.null(conf.level)
+	
+	# Case 2: inputs: sens, spec, prev, N
+	case2 <- function(sens, spec, prev, N) {
+		TP <- sens*prev*N
+		FN <- (1-sens)*prev*N
+		FP <- N*(spec-1)*(prev-1)
+		TN <- N*spec*(1-prev)
+		
+		list(TP=TP,FP=FP,TN=TN,FN=FN)
+	}
+	# Case 5: inputs: sens, sens.lb or sens.ub, spec, N, conf.level
+	case5 <- function(sens, sens.lb, sens.ub, spec, N, conf.level) {
+		ci.data <- list(estimate=sens, lb=sens.lb, ub=sens.ub, conf.level=conf.level)
+		est.var <- calc.est.var(ci.data)
+		varLogitSENS <- est.var$var
+		sens <- est.var$estimate
+		
+		TP = -1/(varLogitSENS*(sens-1))
+		FP = -(-1+spec)*(varLogitSENS*sens^2*N-varLogitSENS*sens*N+1)/(varLogitSENS*sens*(sens-1))
+		TN = spec*(varLogitSENS*sens^2*N-varLogitSENS*sens*N+1)/(varLogitSENS*sens*(sens-1))
+		FN = 1/(varLogitSENS*sens)
+		
+		list(TP=TP,FP=FP,TN=TN,FN=FN)
+	}
+	
+	
+	# Case 6: inputs: spec, spec.lb or spec.ub, sens, N, conf.level
+	case6 <- function(spec, spec.lb, spec.ub, sens, N, conf.level) {
+		ci.data <- list(estimate=spec, lb=spec.lb, ub=spec.ub, conf.level=conf.level)
+		est.var <- calc.est.var(ci.data)
+		varLogitSPEC <- est.var$var
+		spec <- est.var$estimate
+		
+		TP = sens*(-1*varLogitSPEC*spec*N+varLogitSPEC*spec^2*N+1)/(varLogitSPEC*spec*(-1+spec))
+		FP = 1/(varLogitSPEC*spec)
+		TN = -1/(varLogitSPEC*(-1+spec))
+		FN = -(sens-1)*(-1*varLogitSPEC*spec*N+varLogitSPEC*spec^2*N+1)/(varLogitSPEC*spec*(-1+spec))
+		
+		list(TP=TP,FP=FP,TN=TN,FN=FN)
+	}
+	
+	# Case 8: inputs sens, sens.lb or sens.ub, spec, spec.lb or spec.ub, conf.level
+	case8 <- function(sens, sens.lb, sens.ub, spec, spec.lb, spec.ub, conf.level) {
+		ci.data <- list(estimate=sens, lb=sens.lb, ub=sens.ub, conf.level=conf.level)
+		est.var <- calc.est.var(ci.data)
+		varLogitSENS <- est.var$var
+		sens <- est.var$estimate
+		
+		ci.data <- list(estimate=spec, lb=spec.lb, ub=spec.ub, conf.level=conf.level)
+		est.var <- calc.est.var(ci.data)
+		varLogitSPEC <- est.var$var
+		spec <- est.var$estimate
+		
+		TP = -1/(varLogitSENS*(sens-1))
+		FP = 1/(varLogitSPEC*spec)
+		TN = -1/(varLogitSPEC*(-1+spec))
+		FN = 1/(varLogitSENS*sens)
+	
+		list(TP=TP,FP=FP,TN=TN,FN=FN)
+	}
+
+
+	
+	case2res <- case2(sens, spec, prev, N)
+	case5res <- case5(sens, sens.lb, sens.ub, spec, N, conf.level)
+    case6res <- case6(spec, spec.lb, spec.ub, sens, N, conf.level)
+	case8res <- case8(sens, sens.lb, sens.ub, spec, spec.lb, spec.ub, conf.level)
+
+	# TP,FN
+	if (case2a.condition) {
+		print("Entering 2a")
+		TP <- if(is.null(TP)) case2res$TP
+		FN <- if(is.null(FN)) case2res$FN
+	} else if (case5a.condition) {
+		print("Entering 5a")
+		TP <- if(is.null(TP)) case5res$TP
+		FN <- if(is.null(FN)) case5res$FN
+	} else if (case6b.condition) {
+		print("Entering 6b")
+		TP <- if(is.null(TP)) case6res$TP
+		FN <- if(is.null(FN)) case6res$FN
+	} else if (case8a.condition) {
+		print("Entering 8a")
+		TP <- if(is.null(TP)) case8res$TP
+		FN <- if(is.null(FN)) case8res$FN
+	}
+	
+	# TN,FP
+	if (case2b.condition) {
+		print("Entering 2b")
+		TN <- if(is.null(TN)) case2res$TN
+	    FP <- if(is.null(FP)) case2res$FP
+	} else if (case5b.condition) {
+		print("Entering 5b")
+		TN <- if(is.null(TN)) case5res$TN
+		FP <- if(is.null(FP)) case5res$FP
+	} else if (case6a.condition) {
+		print("Entering 6a")
+		TN <- if(is.null(TN)) case6res$TN
+		FP <- if(is.null(FP)) case6res$FP
+	} else if (case8b.condition) {
+		print("Entering 8b")
+		TN <- if(is.null(TN)) case8res$TN
+		FP <- if(is.null(FP)) case8res$FP
+	}
+	
+	# Convert NULL to NA for fun, also other reasons?
+	if(is.null(TP)) {
+    	TP <- NA
+	}
+	if(is.null(FN)) {
+    	FN <- NA
+	}
+	if(is.null(TN)) {
+    	TN <- NA
+	}
+	if(is.null(FP)) {
+    	FP <- NA
+	}
+	
+	# calculate rounding error
+	TP.rnd.err <- abs(TP-round(TP,digits=0))
+	FN.rnd.err <- abs(FN-round(FN,digits=0))
+	TN.rnd.err <- abs(TN-round(TN,digits=0))
+	FP.rnd.err <- abs(FP-round(FP,digits=0))
+	
+  
+  
+	TP <- round(TP,digits=0)
+	FN <- round(FN,digits=0)
+	TN <- round(TN,digits=0)
+	FP <- round(FP,digits=0)
+	
+	# return
+	list(TP=TP,
+		 FN=FN,
+		 TN=TN,
+		 FP=FP,
+		 TP.rnd.err=TP.rnd.err,
+		 FN.rnd.err=FN.rnd.err,
+		 TN.rnd.err=TN.rnd.err,
+		 FP.rnd.err=FP.rnd.err)
 }
 
 calc.est.var <- function(ci.data) {
@@ -349,92 +686,117 @@ calc.est.var <- function(ci.data) {
   est.var
 }
 
-calc.sens.data <- function(diag.data) {
-  # back-calculate TP, FN, sens, var from any two known values
-  # Notes:  TP = 1 / (( 1-sens) * var)
-  #         FN = 1 / (sens * var)
-  #         TP / FN = sens / (1-sens)
-  #         FN / TP = (1-sens) / sens
-  #
-  TP<-NULL; FN<-NULL; TN<-NULL; FP<-NULL; sens<-NULL; sens.var<-NULL
-  
-    
-  if (isnt.null(diag.data$sens) & isnt.null(diag.data$sens.var)) {
-    sens <- diag.data$sens
-    sens.var <- diag.data$sens.var
-    diag.data$TP <- round(1 / ((1-sens) * sens.var), digits=0)
-    diag.data$FN <- round(1 / (sens * sens.var), digits=0)
-  } else if (isnt.null(diag.data$sens) & isnt.null(diag.data$TP)) {
-    sens <- diag.data$sens 
-    TP <- diag.data$TP
-    diag.data$FN <- round(((1 - sens) / sens) * TP, digits=0)
-    diag.data$sens.var <- 1 / ((1 - sens) * TP)
-  } else if (isnt.null(diag.data$sens) & isnt.null(diag.data$FN)) {
-    sens <- diag.data$sens 
-    FN <- diag.data$FN
-    diag.data$TP <- round((sens / (1 - sens)) * FN, digits=0)
-    diag.data$sens.var <- 1 / (sens * FN)
-  } else if (isnt.null(diag.data$sens.var) & isnt.null(diag.data$TP)) {
-    sens.var <- diag.data$sens.var 
-    TP <- diag.data$TP
-    sens <- 1 - 1/(TP * sens.var)
-    diag.data$sens <- sens
-    diag.data$FN <- round(1 / (sens * sens.var), digits=0)
-  } else if (isnt.null(diag.data$sens.var) & isnt.null(diag.data$FN)) {
-    sens.var <- diag.data$sens.var 
-    FN <- diag.data$FN
-    sens <- 1 / (FN * sens.var)
-    diag.data$sens <- sens
-    diag.data$TP <- round(1 / ((1-sens) * sens.var), digits=0)
-  }     
-  diag.data
-}
-
-calc.spec.data <- function(diag.data) {
-  # back-calculate TN, FP, spec, var from any two known values
-  # Note: This function is identical to calc.sens.data with the following substitutions:
-  # sens -> spec
-  # TP -> TN
-  # FN -> FP
-  # Could combine into one function, but it would be less readable. 
-  #
-  # Notes:  TN = 1 / (( 1-spec) * var)
-  #         FP = 1 / (spec * var)
-  #         TN / FP = spec / (1-spec)
-  #         FP / TN = (1-spec) / spec
-  #
-  TN<-NULL; FP<-NULL; TN<-NULL; FP<-NULL; spec<-NULL; spec.var<-NULL
-  
-    
-  if (isnt.null(diag.data$spec) & isnt.null(diag.data$spec.var)) {
-    spec <- diag.data$spec
-    spec.var <- diag.data$spec.var
-    diag.data$TN <- round(1 / ((1-spec) * spec.var), digits=0)
-    diag.data$FP <- round(1 / (spec * spec.var), digits=0)
-  } else if (isnt.null(diag.data$spec) & isnt.null(diag.data$TN)) {
-    spec <- diag.data$spec 
-    TN <- diag.data$TN
-    diag.data$FP <- round(((1 - spec) / spec) * TN, digits=0)
-    diag.data$spec.var <- 1 / ((1 - spec) * TN)
-  } else if (isnt.null(diag.data$spec) & isnt.null(diag.data$FP)) {
-    spec <- diag.data$spec 
-    FP <- diag.data$FP
-    diag.data$TN <- round((spec / (1 - spec)) * FP, digits=0)
-    diag.data$spec.var <- 1 / (spec * FP)
-  } else if (isnt.null(diag.data$spec.var) & isnt.null(diag.data$TN)) {
-    spec.var <- diag.data$spec.var 
-    TN <- diag.data$TN
-    spec <- 1 - 1/(TN * spec.var)
-    diag.data$spec <- spec
-    diag.data$FP <- round(1 / (spec * spec.var), digits=0)
-  } else if (isnt.null(diag.data$spec.var) & isnt.null(diag.data$FP)) {
-    spec.var <- diag.data$spec.var 
-    FP <- diag.data$FP
-    spec <- 1 / (FP * spec.var)
-    diag.data$spec <- spec
-    diag.data$TN <- round(1 / ((1-spec) * spec.var), digits=0)
-  }          
-  diag.data
-}
 
 
+########### OLD DIAGNOSTIC FUNCTIONS NOT CURRENTLY USED ########################
+# Do not delete them yet, they are good for reference #
+
+#impute.diagnostic.data <- function(diag.data, metric){
+#    # this function imputes diagnostic data (i.e., 2x2 tables) from the fields
+#    # available in the diagnostic.data data frame parameter.
+#    #
+#    if (metric=="Sens") {
+#      ci.data <- list(estimate=diag.data$sens, lb=diag.data$sens.lb, ub=diag.data$sens.ub, conf.level=diag.data$conf.level)
+#      est.var <- calc.est.var(ci.data)
+#      # fill in estimate, ci.lb, ci.ub
+#      diag.data$sens <- est.var$estimate
+#      diag.data$sens.var <- est.var$var
+#      diag.data <- calc.sens.data(diag.data)
+#    } else if (metric=="Spec") {
+#      ci.data <- list(estimate=diag.data$spec, lb=diag.data$spec.lb, ub=diag.data$spec.ub, conf.level=diag.data$conf.level)
+#      est.var <- calc.est.var(ci.data)
+#      # fill in estimate, ci.lb, ci.ub
+#      diag.data$spec <- est.var$estimate
+#      diag.data$spec.var <- est.var$var
+#      diag.data <- calc.spec.data(diag.data)
+#    }  
+#    diag.data 
+#}
+
+#calc.sens.data <- function(diag.data) {
+#  # back-calculate TP, FN, sens, var from any two known values
+#  # Notes:  TP = 1 / (( 1-sens) * var)
+#  #         FN = 1 / (sens * var)
+#  #         TP / FN = sens / (1-sens)
+#  #         FN / TP = (1-sens) / sens
+#  #
+#  TP<-NULL; FN<-NULL; TN<-NULL; FP<-NULL; sens<-NULL; sens.var<-NULL
+#  
+#    
+#  if (isnt.null(diag.data$sens) & isnt.null(diag.data$sens.var)) {
+#    sens <- diag.data$sens
+#    sens.var <- diag.data$sens.var
+#    diag.data$TP <- round(1 / ((1-sens) * sens.var), digits=0)
+#    diag.data$FN <- round(1 / (sens * sens.var), digits=0)
+#  } else if (isnt.null(diag.data$sens) & isnt.null(diag.data$TP)) {
+#    sens <- diag.data$sens 
+#    TP <- diag.data$TP
+#    diag.data$FN <- round(((1 - sens) / sens) * TP, digits=0)
+#    diag.data$sens.var <- 1 / ((1 - sens) * TP)
+#  } else if (isnt.null(diag.data$sens) & isnt.null(diag.data$FN)) {
+#    sens <- diag.data$sens 
+#    FN <- diag.data$FN
+#    diag.data$TP <- round((sens / (1 - sens)) * FN, digits=0)
+#    diag.data$sens.var <- 1 / (sens * FN)
+#  } else if (isnt.null(diag.data$sens.var) & isnt.null(diag.data$TP)) {
+#    sens.var <- diag.data$sens.var 
+#    TP <- diag.data$TP
+#    sens <- 1 - 1/(TP * sens.var)
+#    diag.data$sens <- sens
+#    diag.data$FN <- round(1 / (sens * sens.var), digits=0)
+#  } else if (isnt.null(diag.data$sens.var) & isnt.null(diag.data$FN)) {
+#    sens.var <- diag.data$sens.var 
+#    FN <- diag.data$FN
+#    sens <- 1 / (FN * sens.var)
+#    diag.data$sens <- sens
+#    diag.data$TP <- round(1 / ((1-sens) * sens.var), digits=0)
+#  }     
+#  diag.data
+#}
+#
+#calc.spec.data <- function(diag.data) {
+#  # back-calculate TN, FP, spec, var from any two known values
+#  # Note: This function is identical to calc.sens.data with the following substitutions:
+#  # sens -> spec
+#  # TP -> TN
+#  # FN -> FP
+#  # Could combine into one function, but it would be less readable. 
+#  #
+#  # Notes:  TN = 1 / (( 1-spec) * var)
+#  #         FP = 1 / (spec * var)
+#  #         TN / FP = spec / (1-spec)
+#  #         FP / TN = (1-spec) / spec
+#  #
+#  TN<-NULL; FP<-NULL; TN<-NULL; FP<-NULL; spec<-NULL; spec.var<-NULL
+#  
+#    
+#  if (isnt.null(diag.data$spec) & isnt.null(diag.data$spec.var)) {
+#    spec <- diag.data$spec
+#    spec.var <- diag.data$spec.var
+#    diag.data$TN <- round(1 / ((1-spec) * spec.var), digits=0)
+#    diag.data$FP <- round(1 / (spec * spec.var), digits=0)
+#  } else if (isnt.null(diag.data$spec) & isnt.null(diag.data$TN)) {
+#    spec <- diag.data$spec 
+#    TN <- diag.data$TN
+#    diag.data$FP <- round(((1 - spec) / spec) * TN, digits=0)
+#    diag.data$spec.var <- 1 / ((1 - spec) * TN)
+#  } else if (isnt.null(diag.data$spec) & isnt.null(diag.data$FP)) {
+#    spec <- diag.data$spec 
+#    FP <- diag.data$FP
+#    diag.data$TN <- round((spec / (1 - spec)) * FP, digits=0)
+#    diag.data$spec.var <- 1 / (spec * FP)
+#  } else if (isnt.null(diag.data$spec.var) & isnt.null(diag.data$TN)) {
+#    spec.var <- diag.data$spec.var 
+#    TN <- diag.data$TN
+#    spec <- 1 - 1/(TN * spec.var)
+#    diag.data$spec <- spec
+#    diag.data$FP <- round(1 / (spec * spec.var), digits=0)
+#  } else if (isnt.null(diag.data$spec.var) & isnt.null(diag.data$FP)) {
+#    spec.var <- diag.data$spec.var 
+#    FP <- diag.data$FP
+#    spec <- 1 / (FP * spec.var)
+#    diag.data$spec <- spec
+#    diag.data$TN <- round(1 / ((1-spec) * spec.var), digits=0)
+#  }          
+#  diag.data
+#}

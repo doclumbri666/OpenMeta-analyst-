@@ -2,7 +2,7 @@
 
 # Form implementation generated from reading ui file 'diagnostic_data_form.ui'
 #
-# Created: Mon Mar  4 17:15:43 2013
+# Created: Wed Mar 13 11:09:41 2013
 #      by: PyQt4 UI code generator 4.9.6
 #
 # WARNING! All changes made in this file will be lost!
@@ -26,7 +26,7 @@ except AttributeError:
 class Ui_DiagnosticDataForm(object):
     def setupUi(self, DiagnosticDataForm):
         DiagnosticDataForm.setObjectName(_fromUtf8("DiagnosticDataForm"))
-        DiagnosticDataForm.resize(380, 325)
+        DiagnosticDataForm.resize(380, 335)
         icon = QtGui.QIcon()
         icon.addPixmap(QtGui.QPixmap(_fromUtf8(":/images/meta.png")), QtGui.QIcon.Normal, QtGui.QIcon.Off)
         DiagnosticDataForm.setWindowIcon(icon)
@@ -72,13 +72,16 @@ class Ui_DiagnosticDataForm(object):
         self.prevalence_lbl = QtGui.QLabel(DiagnosticDataForm)
         self.prevalence_lbl.setObjectName(_fromUtf8("prevalence_lbl"))
         self.horizontalLayout_3.addWidget(self.prevalence_lbl)
-        self.prevalence_le = QtGui.QLineEdit(DiagnosticDataForm)
-        self.prevalence_le.setMinimumSize(QtCore.QSize(75, 0))
-        self.prevalence_le.setMaximumSize(QtCore.QSize(75, 16777215))
-        self.prevalence_le.setObjectName(_fromUtf8("prevalence_le"))
-        self.horizontalLayout_3.addWidget(self.prevalence_le)
+        self.prevalence_txt_box = QtGui.QLineEdit(DiagnosticDataForm)
+        self.prevalence_txt_box.setMinimumSize(QtCore.QSize(75, 0))
+        self.prevalence_txt_box.setMaximumSize(QtCore.QSize(75, 16777215))
+        self.prevalence_txt_box.setObjectName(_fromUtf8("prevalence_txt_box"))
+        self.horizontalLayout_3.addWidget(self.prevalence_txt_box)
         spacerItem1 = QtGui.QSpacerItem(40, 20, QtGui.QSizePolicy.Expanding, QtGui.QSizePolicy.Minimum)
         self.horizontalLayout_3.addItem(spacerItem1)
+        self.startover_Btn = QtGui.QPushButton(DiagnosticDataForm)
+        self.startover_Btn.setObjectName(_fromUtf8("startover_Btn"))
+        self.horizontalLayout_3.addWidget(self.startover_Btn)
         self.verticalLayout.addLayout(self.horizontalLayout_3)
         self.horizontalLayout_2 = QtGui.QHBoxLayout()
         self.horizontalLayout_2.setObjectName(_fromUtf8("horizontalLayout_2"))
@@ -141,14 +144,6 @@ class Ui_DiagnosticDataForm(object):
         self.high_txt_box.setMaximumSize(QtCore.QSize(50, 22))
         self.high_txt_box.setObjectName(_fromUtf8("high_txt_box"))
         self.gridLayout.addWidget(self.high_txt_box, 0, 5, 1, 1)
-        self.label = QtGui.QLabel(DiagnosticDataForm)
-        self.label.setObjectName(_fromUtf8("label"))
-        self.gridLayout.addWidget(self.label, 0, 6, 1, 1)
-        self.se_txt_box = QtGui.QLineEdit(DiagnosticDataForm)
-        self.se_txt_box.setMinimumSize(QtCore.QSize(50, 22))
-        self.se_txt_box.setMaximumSize(QtCore.QSize(50, 22))
-        self.se_txt_box.setObjectName(_fromUtf8("se_txt_box"))
-        self.gridLayout.addWidget(self.se_txt_box, 0, 7, 1, 1)
         self.verticalLayout.addLayout(self.gridLayout)
         self.horizontalLayout = QtGui.QHBoxLayout()
         self.horizontalLayout.setObjectName(_fromUtf8("horizontalLayout"))
@@ -164,6 +159,7 @@ class Ui_DiagnosticDataForm(object):
         self.horizontalLayout.addWidget(self.label_2)
         self.alpha_edit = QtGui.QLineEdit(DiagnosticDataForm)
         self.alpha_edit.setMaximumSize(QtCore.QSize(30, 16777215))
+        self.alpha_edit.setText(_fromUtf8(""))
         self.alpha_edit.setObjectName(_fromUtf8("alpha_edit"))
         self.horizontalLayout.addWidget(self.alpha_edit)
         self.ci_label = QtGui.QLabel(DiagnosticDataForm)
@@ -189,7 +185,7 @@ class Ui_DiagnosticDataForm(object):
         self.buttonBox.setObjectName(_fromUtf8("buttonBox"))
         self.horizontalLayout_4.addWidget(self.buttonBox)
         self.verticalLayout.addLayout(self.horizontalLayout_4)
-        self.prevalence_lbl.setBuddy(self.prevalence_le)
+        self.prevalence_lbl.setBuddy(self.prevalence_txt_box)
 
         self.retranslateUi(DiagnosticDataForm)
         QtCore.QObject.connect(self.buttonBox, QtCore.SIGNAL(_fromUtf8("accepted()")), DiagnosticDataForm.accept)
@@ -211,13 +207,12 @@ class Ui_DiagnosticDataForm(object):
         item = self.two_by_two_table.horizontalHeaderItem(2)
         item.setText(_translate("DiagnosticDataForm", "total", None))
         self.prevalence_lbl.setText(_translate("DiagnosticDataForm", "Prevalence", None))
+        self.startover_Btn.setText(_translate("DiagnosticDataForm", "Start Over", None))
         self.label_13.setText(_translate("DiagnosticDataForm", "metric", None))
         self.label_14.setText(_translate("DiagnosticDataForm", "est.", None))
         self.label_15.setText(_translate("DiagnosticDataForm", "low", None))
         self.label_16.setText(_translate("DiagnosticDataForm", "high", None))
-        self.label.setText(_translate("DiagnosticDataForm", "se", None))
         self.label_2.setText(_translate("DiagnosticDataForm", "α:", None))
-        self.alpha_edit.setText(_translate("DiagnosticDataForm", ".05", None))
         self.ci_label.setText(_translate("DiagnosticDataForm", "(95% confidence interval)", None))
         self.inconsistencyLabel.setText(_translate("DiagnosticDataForm", "INCONSISTENT FORM", None))
 

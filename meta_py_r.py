@@ -12,16 +12,16 @@
 #############################################################################
 
 import math
-#import os
+import os
 import pdb
 #import collections
 
 from PyQt4.QtCore import pyqtRemoveInputHook
-
-from meta_globals import *   
+from meta_globals import (BASE_PATH,CONTINUOUS,ONE_ARM_METRICS,TWO_ARM_METRICS,
+                          TYPE_TO_STR_DICT)
 
 try:
-    import rpy2
+    #import rpy2
     # this line throws a segfault
     from rpy2 import robjects as ro
 except Exception, e:
@@ -29,8 +29,8 @@ except Exception, e:
     print e
     
 import rpy2.robjects
-from rpy2.rinterface import NALogicalType
-from rpy2.rinterface import NARealType
+#from rpy2.rinterface import NALogicalType
+#from rpy2.rinterface import NARealType
 
 try:
     # ascertain that R has write privledges
@@ -73,7 +73,7 @@ def reset_Rs_working_dir():
 #    two_by_two = ro.r('impute.bin.data(bin.data=%s)' % dataf.r_repr())
 #    print two_by_two
 
-def impute_diag_data(diag_data_dict, metric):
+def OLDimpute_diag_data(diag_data_dict, metric):
     print "computing 2x2 table via R..."
     print diag_data_dict
 
@@ -89,6 +89,35 @@ def impute_diag_data(diag_data_dict, metric):
 
     return _rls_to_pyd(two_by_two)
 
+def impute_diag_data(diag_data_dict):
+    print "computing 2x2 table via R..."
+    print diag_data_dict
+
+    # rpy2 doesn't know how to handle None types.
+    # we can just remove them from the dictionary.
+    for param, val in diag_data_dict.items():
+        if val is None:
+            diag_data_dict.pop(param)
+
+    dataf = ro.r['data.frame'](**diag_data_dict)
+    two_by_two = ro.r("gimpute.diagnostic.data(%s)" % (dataf.r_repr()))
+    
+    
+    #print "Imputed 2by2:", _rls_to_pyd(two_by_two)
+    print "Imputed 2by2:", _grlist_to_pydict(two_by_two)
+
+    #return _rls_to_pyd(two_by_two)
+    return _grlist_to_pydict(two_by_two)
+
+def impute_bin_data(bin_data_dict):
+    for param, val in bin_data_dict.items():
+        if val is None:
+            bin_data_dict.pop(param)
+
+    dataf = ro.r['data.frame'](**bin_data_dict)
+    two_by_two = ro.r("gimpute.bin.data(%s)" % (dataf.r_repr()))
+    
+    return _grlist_to_pydict(two_by_two)
 
 def fillin_2x2(table_data_dict):
     #r_str = ["fillin.2x2.simple("]
@@ -126,9 +155,10 @@ def _gis_NA(x):
     #print "Old:", type(x) in [rpy2.rinterface.NALogicalType, rpy2.rinterface.NARealType]
     #print "New:", type(x) in [NALogicalType, NARealType]
     #return type(x) in [rpy2.rinterface.NALogicalType, rpy2.rinterface.NARealType]
-    print "TESTING NA"
+    #print "TESTING NA"
     
-    return type(x) in [NALogicalType, NARealType]
+    #return type(x) in [NALogicalType, NARealType]
+    return str(x) == 'NA'
 
 # NOTE: CUSTOM VERSION......
 def _grlist_to_pydict(r_ls, recurse=True):
@@ -158,7 +188,6 @@ def _grlist_to_pydict(r_ls, recurse=True):
     
     d = {}
     names = r_ls.names
-
     for name, val in zip(names, r_ls):
         #print "name {0}, val {1}".format(name, val)
         if recurse and is_named_R_list(val):
@@ -177,7 +206,7 @@ def _grlist_to_pydict(r_ls, recurse=True):
                     d[name] = val # not a singleton list
                     d[name] = [convert_NA_to_None(x) for x in d[name][:]]
             except: # val is not iterable
-                d[name] = val  
+                d[name] = val
 
     return d
 
@@ -822,10 +851,38 @@ def parse_out_results(result):
                 image_params_paths_d = _rls_to_pyd(text)
         else:
             text_d[text_n]=text
+            # Construct List of Weights for studies
+            if text_n.rfind("Summary") != -1:
+                summary_dict = _grlist_to_pydict(text)
+                try:
+                    if "study.names" in summary_dict['MAResults']: # this is a silly thing to look for but its something I explicitly set in the random methods so I know it's there
+                        text_n_withoutSummary = text_n.replace("Summary","")
+                        text_n_withoutSummary.strip()
+                        key_name = text_n_withoutSummary + " Weights"
+                        key_name.strip()
+                        
+                        study_names = summary_dict['MAResults']['study.names']
+                        study_years = summary_dict['MAResults']['study.years']
+                        study_weights = summary_dict['MAResults']['study.weights']
+                        max_len = max([len(name) for name in study_names])
+                        weights_txt = "studies" + " "*(max_len-1) + "weights\n"
+                        
+                        for name,year,weight in zip(study_names, study_years, study_weights):
+                            weights_txt += "{0:{name_width}} {1} {2:4.1f}%\n".format(name, year, weight*100, name_width=max_len)
+                        text_d[key_name] = weights_txt
+                except:
+                    print("In parse-out results:")
+                    pyqtRemoveInputHook()
+                    pdb.set_trace()
+                    
+            
 
-    return {"images":image_path_d, "image_var_names":image_var_name_d,
-                        "texts":text_d, "image_params_paths":image_params_paths_d,
-                        "image_order":image_order}
+
+    return {"images":image_path_d,
+            "image_var_names":image_var_name_d,
+            "texts":text_d,
+            "image_params_paths":image_params_paths_d,
+            "image_order":image_order}
                 
                                        
 def run_binary_fixed_meta_regression(selected_cov, bin_data_name="tmp_obj", \
@@ -1030,7 +1087,7 @@ def diagnostic_effects_for_study(tp, fn, fp, tn, metrics=["Spec", "Sens"]):
     # first create a diagnostic data object
     r_str = "diag.tmp <- new('DiagnosticData', TP=c(%s), FN=c(%s), TN=c(%s), FP=c(%s))" % \
                             (tp, fn, tn, fp)
-    
+                            
     print "\n\n(diagnostic_effects_for_study): executing:\n %s\n" % r_str
     ro.r(r_str)
     
@@ -1121,6 +1178,9 @@ def effect_for_study(e1, n1, e2=None, n2=None, two_arm=True,
     #print "result: %s" % effect
     point_est = effect[0][0]
     se = math.sqrt(effect[1][0])
+    
+    #print "point_est: ", point_est
+    #print "var:", effect[1][0]
 
     # scalar for computing confidence interval
     r_str = "qnorm(%s)" % conf_level
